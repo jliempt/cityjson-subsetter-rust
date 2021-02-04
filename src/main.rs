@@ -88,7 +88,8 @@ fn main() -> std::io::Result<()> {
     file_in.read_to_end( &mut buf );
 
     let mut file_out = File::create( path_out )?;
-    file_out.write_all( b"Test" )?;
+
+    // file_out.write_all( b"Test" )?;
 
     
     let out = cityjson_cutter::subset::get_subset_bbox( buf, &file_out, bbox );
