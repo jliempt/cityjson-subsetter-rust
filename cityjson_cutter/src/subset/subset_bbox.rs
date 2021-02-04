@@ -15,7 +15,7 @@ static mut BBOX: [ u32; 4 ] = [ 0, 0, 0, 0 ];
 // static mut VERTICES: BTreeMap< u32, [ u32; 3 ] > = BTreeMap::new();
 
 lazy_static! {
-    static ref VERTICES: Mutex< BTreeMap< u32, [ u32; 3 ] > > = Mutex::new( BTreeMap::new() );
+    static ref VERTICES: Mutex< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > = Mutex::new( BTreeMap::new() );
 }
 
 
@@ -58,9 +58,10 @@ pub fn select_cos( buf: &Vec< u8 >, file_out: &File, bbox: [ u32; 4 ] ) -> CityJ
     let mut vertices = VERTICES.lock().unwrap();
     let mut vertices_out: Vec< [ u32; 3 ] > = Vec::with_capacity( vertices.len() );
 
+
     for ( k, v ) in vertices.iter() {
 
-        vertices_out.push( *v );
+        vertices_out.push( v.0 );
 
     }
 
@@ -80,9 +81,9 @@ pub fn select_vertices( buf: &Vec< u8 >, bbox: [ u32; 4 ] ) {
 
 }
 
-fn get_centroid( geometry: &Value, vertices: &MutexGuard< BTreeMap< u32, [ u32; 3 ] > > ) -> Option< [ f32; 2 ] > {
+fn get_centroid( geometry: &Value, vertices: &MutexGuard< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > ) -> Option< [ f32; 2 ] > {
 
-    fn recursionvisit( a: &Value, vs: &mut Vec< u32 >, vertices: &MutexGuard< BTreeMap< u32, [ u32; 3 ] > > ) {
+    fn recursionvisit( a: &Value, vs: &mut Vec< u32 >, vertices: &MutexGuard< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > ) {
 
         if a.is_array() {
 
@@ -143,8 +144,8 @@ fn get_centroid( geometry: &Value, vertices: &MutexGuard< BTreeMap< u32, [ u32; 
                 Some( vertex ) => {
 
                     total += 1;
-                    centroid[ 0 ] += vertex[ 0 ] as f32;
-                    centroid[ 1 ] += vertex[ 1 ] as f32;
+                    centroid[ 0 ] += vertex.0[ 0 ] as f32;
+                    centroid[ 1 ] += vertex.0[ 1 ] as f32;
 
                 },
                 None => {}
@@ -171,6 +172,27 @@ fn get_centroid( geometry: &Value, vertices: &MutexGuard< BTreeMap< u32, [ u32; 
         None
 
     }
+
+}
+
+fn update_array_indices( a: &mut Value, vertices: &MutexGuard< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > ) {
+
+	if a.is_array() {
+
+        for n in ( 0..a.as_array().unwrap().len() ) {
+
+        	update_array_indices( &mut a[ n ], vertices );
+
+        }
+
+    } else if !a.is_null() {
+
+    	let index = vertices.get( &(a.as_u64().unwrap() as u32) ).unwrap().1;
+
+    	*a = serde_json::value::to_value( index ).unwrap();
+
+    }
+
 
 }
 
@@ -210,7 +232,7 @@ where
             let mut res: Vec< Value > = Vec::new(); 
 
             // Iterate over keys and values in "CityObjects"
-            while let Some( ( key, value ) ) = map.next_entry::< String, serde_json::Value >()? {
+            while let Some( ( key, mut value ) ) = map.next_entry::< String, serde_json::Value >()? {
 
                 
                 let centroid = get_centroid( &value[ "geometry" ], &vertices );
@@ -221,6 +243,16 @@ where
 
                         if c[ 0 ] >= bbox[ 0 ] as f32 && c[ 1 ] >= bbox[ 1 ] as f32
                             && c[ 0 ] < bbox[ 2 ] as f32 && c[ 1 ] < bbox[ 3 ] as f32 {
+
+                            	let mut geoms = value[ "geometry" ].as_array_mut().unwrap();
+
+							    for i in ( 0..geoms.len() ) {
+
+							        let mut geom = geoms.get_mut( i ).unwrap();
+
+							        update_array_indices( &mut geom.get_mut( "boundaries" ).unwrap(), &vertices );
+
+							    }
 
                                 // Add CO to result if centroid within bbox
                                 res.push( value );
@@ -285,12 +317,17 @@ where
             let mut i: u32 = 0;
             let mut vertices = VERTICES.lock().unwrap();
 
+            // Amount of vertices stored, used later for index
+    		let mut j = 0;
+
         	while let Some( elem ) = seq.next_element::< [ u32; 3 ] >()? {
 
         		if elem[ 0 ] >= bbox[ 0 ] && elem[ 1 ] >= bbox[ 1 ]
                     && elem[ 0 ] < bbox[ 2 ] && elem[ 1 ] < bbox[ 3 ] {
 
-                        vertices.insert( i, elem );
+                        vertices.insert( i, ( elem, j ) );
+
+                        j += 1;
 
                     }
 
