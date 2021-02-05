@@ -56,50 +56,35 @@ fn main() -> std::io::Result<()> {
         path_out = p;
     }
 
-    // let mut bbox = Vec::with_capacity( 4 );
-    let mut bbox: [ u32; 4 ] = [ 0, 0, 0, 0 ];
+    let mut bbox: [ f32; 4 ] = [ 0.0, 0.0, 0.0, 0.0 ];
 
     if let Some(x) = matches.value_of("min_x") {
-        // bbox.push( x.parse::<i32>().unwrap() );
-        bbox[ 0 ] = x.parse::< u32 >().unwrap();
+        bbox[ 0 ] = x.parse::< f32 >().unwrap();
     }
 
     if let Some(x) = matches.value_of("min_y") {
-        // bbox.push( x.parse::<i32>().unwrap() );
-        bbox[ 1 ] = x.parse::< u32 >().unwrap();
+        bbox[ 1 ] = x.parse::< f32 >().unwrap();
     }
 
     if let Some(x) = matches.value_of("max_x") {
-        // bbox.push( x.parse::<i32>().unwrap() );
-        bbox[ 2 ] = x.parse::< u32 >().unwrap();
+        bbox[ 2 ] = x.parse::< f32 >().unwrap();
     }
 
     if let Some(x) = matches.value_of("max_y") {
-        // bbox.push( x.parse::<i32>().unwrap() );
-        bbox[ 3 ] = x.parse::< u32 >().unwrap();
+        bbox[ 3 ] = x.parse::< f32 >().unwrap();
     }
 
     println!("{:?}", bbox);
 
-
     let mut file_in = File::open( path_in )?;
-    // let f = BufReader::new( file_in );
     let mut buf = Vec::new();
     file_in.read_to_end( &mut buf );
 
-    let mut file_out = File::create( path_out )?;
-
-    // file_out.write_all( b"Test" )?;
-
-    
+    let file_out = File::create( path_out )?;
     let out = cityjson_cutter::subset::get_subset_bbox( buf, &file_out, bbox );
-
-    let mut bw = BufWriter::new( file_out );
+    let bw = BufWriter::new( file_out );
 
     let res = serde_json::ser::to_writer( bw, &out );
-    // let res = serde_json::to_string( &out ).unwrap();
-
-    // file_out.write_fmt( res );
 
     Ok(())
     

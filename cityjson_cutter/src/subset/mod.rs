@@ -3,7 +3,9 @@ mod subset_bbox;
 use crate::subset::subset_bbox::CityJSON;
 use std::fs::File;
 
-pub fn get_subset_bbox( buf: Vec< u8 >, file_out: &File, bbox: [ u32; 4 ] ) -> CityJSON {
+pub fn get_subset_bbox( buf: Vec< u8 >, file_out: &File, bbox: [ f32; 4 ] ) -> CityJSON {
+
+	subset_bbox::get_transform( &buf );
 
 	subset_bbox::select_vertices( &buf, bbox );
 

@@ -11,11 +11,10 @@ use std::collections::BTreeMap;
 use lazy_static::lazy_static;
 use std::sync::{ Mutex, MutexGuard};
 
-static mut BBOX: [ u32; 4 ] = [ 0, 0, 0, 0 ];
-// static mut VERTICES: BTreeMap< u32, [ u32; 3 ] > = BTreeMap::new();
-
+static mut BBOX: [ f32; 4 ] = [ 0.0, 0.0, 0.0, 0.0 ];
+static mut TRANSFORM: Value = json!( null );
 lazy_static! {
-    static ref VERTICES: Mutex< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > = Mutex::new( BTreeMap::new() );
+    static ref VERTICES: Mutex< BTreeMap< u32, ( [ f32; 3 ], u32 ) > > = Mutex::new( BTreeMap::new() );
 }
 
 
@@ -46,8 +45,15 @@ struct Vertices {
 
 }
 
+#[derive(Serialize, Deserialize, Default, Debug)]
+struct Transform {
 
-pub fn select_cos( buf: &Vec< u8 >, file_out: &File, bbox: [ u32; 4 ] ) -> CityJSON {
+	transform: Option< Value >,
+
+}
+
+
+pub fn select_cos( buf: &Vec< u8 >, file_out: &File, bbox: [ f32; 4 ] ) -> CityJSON {
 
     unsafe {
         BBOX = bbox;
@@ -56,7 +62,7 @@ pub fn select_cos( buf: &Vec< u8 >, file_out: &File, bbox: [ u32; 4 ] ) -> CityJ
 	let mut out: CityJSON = serde_json::from_slice( buf ).expect("Error parsing CityJSON buffer");
 
     let mut vertices = VERTICES.lock().unwrap();
-    let mut vertices_out: Vec< [ u32; 3 ] > = Vec::with_capacity( vertices.len() );
+    let mut vertices_out: Vec< [ f32; 3 ] > = Vec::with_capacity( vertices.len() );
 
 
     for ( k, v ) in vertices.iter() {
@@ -71,19 +77,48 @@ pub fn select_cos( buf: &Vec< u8 >, file_out: &File, bbox: [ u32; 4 ] ) -> CityJ
 
 }
 
-pub fn select_vertices( buf: &Vec< u8 >, bbox: [ u32; 4 ] ) {
+pub fn select_vertices( buf: &Vec< u8 >, bbox: [ f32; 4 ] ) {
 
-    unsafe {
-        BBOX = bbox;
-    }
+	let mut bbox_copy = bbox;
+
+	unsafe {
+
+		if !TRANSFORM.is_null() {
+
+			bbox_copy[ 0 ] = ( ( bbox_copy[ 0 ] as f64 - TRANSFORM[ "translate" ][ 0 ].as_f64().unwrap() ) / TRANSFORM[ "scale" ][ 0 ].as_f64().unwrap() ) as f32 ;
+			bbox_copy[ 1 ] = ( ( bbox_copy[ 1 ] as f64 - TRANSFORM[ "translate" ][ 1 ].as_f64().unwrap() ) / TRANSFORM[ "scale" ][ 1 ].as_f64().unwrap() ) as f32 ;
+			bbox_copy[ 2 ] = ( ( bbox_copy[ 2 ] as f64 - TRANSFORM[ "translate" ][ 0 ].as_f64().unwrap() ) / TRANSFORM[ "scale" ][ 0 ].as_f64().unwrap() ) as f32 ;
+			bbox_copy[ 3 ] = ( ( bbox_copy[ 3 ] as f64 - TRANSFORM[ "translate" ][ 1 ].as_f64().unwrap() ) / TRANSFORM[ "scale" ][ 1 ].as_f64().unwrap() ) as f32 ;
+
+		}
+
+		BBOX = bbox_copy;
+
+	}
+
+	println!("{:?}", bbox_copy);
 
 	let mut out: Vertices = serde_json::from_slice( buf ).expect("Error parsing CityJSON buffer");
 
 }
 
-fn get_centroid( geometry: &Value, vertices: &MutexGuard< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > ) -> Option< [ f32; 2 ] > {
+pub fn get_transform( buf: &Vec< u8 > ) {
 
-    fn recursionvisit( a: &Value, vs: &mut Vec< u32 >, vertices: &MutexGuard< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > ) {
+	let out: Transform = serde_json::from_slice( buf ).expect("Error parsing CityJSON buffer");
+
+	if out.transform != None {
+
+		unsafe {
+			TRANSFORM = out.transform.unwrap();
+		}
+
+	}
+
+}
+
+fn get_centroid( geometry: &Value, vertices: &MutexGuard< BTreeMap< u32, ( [ f32; 3 ], u32 ) > > ) -> Option< [ f32; 2 ] > {
+
+    fn recursionvisit( a: &Value, vs: &mut Vec< u32 >, vertices: &MutexGuard< BTreeMap< u32, ( [ f32; 3 ], u32 ) > > ) {
 
         if a.is_array() {
 
@@ -175,7 +210,7 @@ fn get_centroid( geometry: &Value, vertices: &MutexGuard< BTreeMap< u32, ( [ u32
 
 }
 
-fn update_array_indices( a: &mut Value, vertices: &MutexGuard< BTreeMap< u32, ( [ u32; 3 ], u32 ) > > ) {
+fn update_array_indices( a: &mut Value, vertices: &MutexGuard< BTreeMap< u32, ( [ f32; 3 ], u32 ) > > ) {
 
 	if a.is_array() {
 
@@ -225,7 +260,7 @@ where
             // TODO: adding parent-children
 
             let vertices = VERTICES.lock().unwrap();
-            let mut bbox: [ u32; 4 ];
+            let mut bbox: [ f32; 4 ];
             unsafe {
                 bbox = BBOX;
             }
@@ -241,8 +276,8 @@ where
 
                     Some( c ) => {
 
-                        if c[ 0 ] >= bbox[ 0 ] as f32 && c[ 1 ] >= bbox[ 1 ] as f32
-                            && c[ 0 ] < bbox[ 2 ] as f32 && c[ 1 ] < bbox[ 3 ] as f32 {
+                        if c[ 0 ] >= bbox[ 0 ] && c[ 1 ] >= bbox[ 1 ]
+                            && c[ 0 ] < bbox[ 2 ] && c[ 1 ] < bbox[ 3 ] {
 
                             	let mut geoms = value[ "geometry" ].as_array_mut().unwrap();
 
@@ -302,16 +337,17 @@ where
             S: SeqAccess<'de>,
         {
 
-            let mut bbox: [ u32; 4 ];
+            let mut bbox: [ f32; 4 ];
             unsafe {
                 bbox = BBOX;
             }
 
+            println!("{:?}", bbox);
             // 5% bbox margin
-            bbox[ 0 ] = ( bbox[ 0 ] as f32 * 0.95 ) as u32;
-            bbox[ 1 ] = ( bbox[ 1 ] as f32 * 0.95 ) as u32;
-            bbox[ 2 ] = ( bbox[ 2 ] as f32 * 1.05 ) as u32;
-            bbox[ 3 ] = ( bbox[ 3 ] as f32 * 1.05 ) as u32;
+            bbox[ 0 ] = bbox[ 0 ] * 0.95;
+            bbox[ 1 ] = bbox[ 1 ] * 0.95;
+            bbox[ 2 ] = bbox[ 2 ] * 1.05;
+            bbox[ 3 ] = bbox[ 3 ] * 1.05;
 
             let mut res = BTreeMap::new();
             let mut i: u32 = 0;
@@ -320,10 +356,17 @@ where
             // Amount of vertices stored, used later for index
     		let mut j = 0;
 
-        	while let Some( elem ) = seq.next_element::< [ u32; 3 ] >()? {
+        	while let Some( elem ) = seq.next_element::< [ f32; 3 ] >()? {
 
+/*        		println!("{:?}", elem);
+        		println!("{:?}", bbox);
+*/
         		if elem[ 0 ] >= bbox[ 0 ] && elem[ 1 ] >= bbox[ 1 ]
                     && elem[ 0 ] < bbox[ 2 ] && elem[ 1 ] < bbox[ 3 ] {
+
+                    	// println!("{:?}", elem);
+                    	// println!("{:?}", bbox);
+                    	// println!("ja");
 
                         vertices.insert( i, ( elem, j ) );
 
